@@ -206,6 +206,14 @@ static const unsigned int *icon_data;
 static int icon_w;
 static int icon_h;
 
+// Satellite client
+int sock_client = -1;
+struct sockaddr_in client_addr;
+
+// Satellite server
+int sock_server = -1;
+struct sockaddr_in server_addr;
+
 static boolean MouseShouldBeGrabbed()
 {
     // never grab the mouse when in screensaver mode
@@ -481,7 +489,6 @@ void I_GetEvent(void)
 // I_StartTic
 //
 
-static int sock_uplink = -1;
 
 void I_StartTic(void)
 {
@@ -492,24 +499,6 @@ void I_StartTic(void)
 
     /////// UPLINK /////////
 
-
-    if (sock_uplink == -1){
-
-        struct sockaddr_in serveraddr;
-        sock_uplink = socket(AF_INET,SOCK_DGRAM,0);
-
-        if (sock_uplink >= 0){
-            memset(&serveraddr, 0, sizeof(serveraddr));
-            serveraddr.sin_family = AF_INET;
-            serveraddr.sin_addr.s_addr = INADDR_ANY;
-            serveraddr.sin_port = htons(7777);
-
-            bind(sock_uplink, (const struct sockaddr * )&serveraddr, sizeof(serveraddr));
-
-            fcntl(sock_uplink, F_SETFL, O_NONBLOCK);
-    }
-}
-
     char buffer[32];
     struct sockaddr_in cliaddr;
     socklen_t len = sizeof(cliaddr);
@@ -518,20 +507,19 @@ void I_StartTic(void)
     int n;
 
     // Cambiado if por while para procesar todas las teclas acumuladas
-    while ((n = recvfrom(sock_uplink, buffer, sizeof(buffer) - 1, MSG_DONTWAIT, (struct sockaddr *)&cliaddr, &len)) > 0) {
+    while ((n = recvfrom(sock_server, buffer, sizeof(buffer) - 1, MSG_DONTWAIT,
+                         (struct sockaddr *) &cliaddr, &len)) > 0)
+    {
         buffer[n] = '\0'; // Ahora es seguro por el 'sizeof(buffer) - 1'
         int doom_key;
         char type;
 
-        // printf("received: %s\n",buffer);
-        // fflush(stdout);
-
-        if (sscanf(buffer, "%c:%d", &type, &doom_key) == 2) {
+        if (sscanf(buffer, "%c:%d", &type, &doom_key) == 2)
+        {
             event_t event;
-            memset(&event,0, sizeof(event));
             event.type = (type == 'D') ? ev_keydown : ev_keyup;
             event.data1 = doom_key;
-            D_PostEvent(&event); 
+            D_PostEvent(&event);
         }
     }
 
@@ -787,29 +775,15 @@ void I_FinishUpdate(void)
     if (noblit)
         return;
 
-    // ==========================================
-    // INICIO INYECCIÓN HACKUDC - DOWNLINK
-    // ==========================================
-    static int sock_fd = -1;
-    static struct sockaddr_in dest_addr;
     static unsigned char prev_frame[8000];
     static int first_frame = 1;
     static int frame_skip = 0;
-
-    // 1. Inicializar el socket solo en el primer frame
-    if (sock_fd == -1)
-    {
-        sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
-        dest_addr.sin_family = AF_INET;
-        dest_addr.sin_port = htons(6666); // Puerto de tu script Python
-        dest_addr.sin_addr.s_addr = inet_addr("192.168.6.159"); // IP destino
-    }
 
     // 2. Enviar la matriz de píxeles al espacio
     if (I_VideoBuffer != NULL)
     {
         frame_skip++;
-        if (frame_skip % 5 == 0) 
+        if (frame_skip % 5 == 0)
         {
             // --- NOVEDAD 1: TABLA DE GRISES REALES ---
             // Convierte el índice de color raro de DOOM en un gris perfecto de 0 a 15
@@ -843,9 +817,12 @@ void I_FinishUpdate(void)
 
             // --- 2. EL PRE-ESCÁNER ---
             int pixeles_cambiados = 0;
-            if (!first_frame) {
-                for (int i = 0; i < 8000; i++) {
-                    if (curr_frame[i] != prev_frame[i]) {
+            if (!first_frame)
+            {
+                for (int i = 0; i < 8000; i++)
+                {
+                    if (curr_frame[i] != prev_frame[i])
+                    {
                         pixeles_cambiados++;
                     }
                 }
@@ -861,10 +838,14 @@ void I_FinishUpdate(void)
                 unsigned char color_actual = curr_frame[0];
                 int contador = 1;
 
-                for (int i = 1; i < 8000; i++) {
-                    if (curr_frame[i] == color_actual && contador < 255) {
-                         contador++;
-                    } else {
+                for (int i = 1; i < 8000; i++)
+                {
+                    if (curr_frame[i] == color_actual && contador < 255)
+                    {
+                        contador++;
+                    }
+                    else
+                    {
                         rle_payload[rle_ptr++] = contador;
                         rle_payload[rle_ptr++] = color_actual;
                         color_actual = curr_frame[i];
@@ -891,7 +872,7 @@ void I_FinishUpdate(void)
 
                     sendto(sock_fd, rle_payload, rle_ptr, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
                 }
-                
+
                 memcpy(prev_frame, curr_frame, 8000);
                 first_frame = 0;
 
@@ -917,9 +898,6 @@ void I_FinishUpdate(void)
             }
         }
     }
-    // ==========================================
-    // FIN INYECCIÓN HACKUDC
-    // ==========================================
 
     if (need_resize)
     {
@@ -1026,10 +1004,7 @@ void I_FinishUpdate(void)
 
     // Draw!
 
-    SDL_RenderPresent(renderer);
-
-    // Restore background and undo the disk indicator, if it was drawn.
-    V_RestoreDiskBackground();
+    SDL_RenderPresent(renderer); // Restore background and undo the disk indicator, if it was drawn. V_RestoreDiskBackground();
 }
 
 
@@ -1722,6 +1697,30 @@ void I_InitGraphics(void)
     // Call I_ShutdownGraphics on quit
 
     I_AtExit(I_ShutdownGraphics, true);
+
+    char *client_addr_env = getenv("DOOM_CLIENT_ADDR");
+    char *client_port_env = getenv("DOOM_CLIENT_PORT");
+    sock_client = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock_client >= 0)
+    {
+        client_addr.sin_family = AF_INET;
+        client_addr.sin_addr.s_addr = inet_addr(client_addr_env);
+        client_addr.sin_port = htons(atoi(client_port_env));
+    }
+
+    char *server_port_env = getenv("DOOM_SERVER_PORT");
+    sock_server = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock_server >= 0)
+    {
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_addr.s_addr = INADDR_ANY;
+        server_addr.sin_port = htons(atoi(server_port_env));
+
+        bind(sock_server, (const struct sockaddr *) &server_addr,
+             sizeof(server_addr));
+
+        fcntl(sock_server, F_SETFL, O_NONBLOCK);
+    }
 }
 
 // Bind all variables controlling video options into the configuration
