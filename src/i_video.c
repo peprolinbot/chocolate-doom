@@ -747,6 +747,31 @@ static void CreateUpscaledTexture(boolean force)
     }
 }
 
+static uint8_t encode_hamming(uint8_t data) {
+    uint8_t d0 = (data >> 0) & 1;
+    uint8_t d1 = (data >> 1) & 1;
+    uint8_t d2 = (data >> 2) & 1;
+    uint8_t d3 = (data >> 3) & 1;
+
+    // Bits de paridad
+    uint8_t p1 = d0 ^ d1 ^ d3;
+    uint8_t p2 = d0 ^ d2 ^ d3;
+    uint8_t p3 = d1 ^ d2 ^ d3;
+
+    // Empaquetamos: p1(0), p2(1), d0(2), p3(3), d1(4), d2(5), d3(6)
+    return (p1 << 0) | (p2 << 1) | (d0 << 2) | (p3 << 3) |
+           (d1 << 4) | (d2 << 5) | (d3 << 6);
+}
+
+// Calcula un checksum XOR simple del payload
+static uint8_t calculate_checksum(unsigned char *data, int len) {
+    uint8_t chk = 0;
+    for (int i = 0; i < len; i++) {
+        chk ^= data[i];
+    }
+    return chk;
+}
+
 //
 // I_FinishUpdate
 //
@@ -786,24 +811,37 @@ void I_FinishUpdate(void)
         frame_skip++;
         if (frame_skip % 5 == 0) 
         {
+            // --- NOVEDAD 1: TABLA DE GRISES REALES ---
+            // Convierte el índice de color raro de DOOM en un gris perfecto de 0 a 15
+            static unsigned char gray_lut[256];
+            static int lut_init = 0;
+            if (!lut_init) {
+                for (int i=0; i<256; i++) {
+                    // Fórmula estándar de luminancia de TV: L = R*0.3 + G*0.59 + B*0.11
+                    int lum = (palette[i].r * 77 + palette[i].g * 150 + palette[i].b * 29) >> 8;
+                    gray_lut[i] = lum >> 4; // Lo escalamos a 4-bits
+                }
+                lut_init = 1;
+            }
+
             unsigned char curr_frame[8000];
             int ptr = 0;
 
-            // --- 1. DOWNSAMPLING + 4-BIT PACKING (2 píxeles por cada byte) ---
+            // --- 1. DOWNSAMPLING CON COLOR REAL ---
             for (unsigned int y = 0; y < SCREENHEIGHT; y += 2) {
-                // Saltamos de 4 en 4 en la X para coger los 2 píxeles correspondientes
                 for (unsigned int x = 0; x < SCREENWIDTH; x += 4) { 
+                    unsigned char idx1 = I_VideoBuffer[y * SCREENWIDTH + x];
+                    unsigned char idx2 = I_VideoBuffer[y * SCREENWIDTH + x + 2];
                     
-                    // Cogemos los 2 píxeles y los convertimos de 8 bits a 4 bits (>> 4)
-                    unsigned char p1 = I_VideoBuffer[y * SCREENWIDTH + x] >> 4;
-                    unsigned char p2 = I_VideoBuffer[y * SCREENWIDTH + x + 2] >> 4;
+                    // Pasamos el índice por nuestra tabla mágica
+                    unsigned char p1 = gray_lut[idx1];
+                    unsigned char p2 = gray_lut[idx2];
                     
-                    // Fusionamos: p1 en la mitad alta, p2 en la mitad baja
                     curr_frame[ptr++] = (p1 << 4) | (p2 & 0x0F);
                 }
             }
 
-            // --- 2. EL PRE-ESCÁNER (Ahora trabajamos sobre 8000 bytes empaquetados) ---
+            // --- 2. EL PRE-ESCÁNER ---
             int pixeles_cambiados = 0;
             if (!first_frame) {
                 for (int i = 0; i < 8000; i++) {
@@ -813,10 +851,11 @@ void I_FinishUpdate(void)
                 }
             }
 
-            // --- 3. LA GRAN DECISIÓN (Umbral del 25%: 2000 bytes) ---
-            if (first_frame || pixeles_cambiados > 2000) {
+            // --- 3. LA GRAN DECISIÓN (Con Keyframes de limpieza) ---
+            // NOVEDAD 2: Forzamos RLE/RAW cada 30 frames para limpiar basura de red
+            if (first_frame || pixeles_cambiados > 2000 || (frame_skip % 30 == 0)) {
                 
-                unsigned char rle_payload[16005]; 
+                unsigned char rle_payload[16002]; 
                 rle_payload[0] = 2; // RLE FRAME
                 int rle_ptr = 1;
                 unsigned char color_actual = curr_frame[0];
@@ -836,12 +875,20 @@ void I_FinishUpdate(void)
                 rle_payload[rle_ptr++] = color_actual;
 
                 if (rle_ptr >= 8000) {
-                    // RAW EMPAQUETADO (Máximo 8001 bytes)
-                    unsigned char raw_payload[8001];
-                    raw_payload[0] = 0; 
+                    unsigned char raw_payload[8002];
+                    raw_payload[0] = 0; // RAW FRAME
                     memcpy(&raw_payload[1], curr_frame, 8000);
-                    sendto(sock_fd, raw_payload, 8001, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+
+                    raw_payload[0] = encode_hamming(raw_payload[0]);
+                    raw_payload[8001] = calculate_checksum(raw_payload, 8001);
+
+                    sendto(sock_fd, raw_payload, 8002, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
                 } else {
+
+                    rle_payload[0] = encode_hamming(rle_payload[0]);
+                    rle_payload[rle_ptr] = calculate_checksum(rle_payload, rle_ptr);
+                    rle_ptr++;
+
                     sendto(sock_fd, rle_payload, rle_ptr, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
                 }
                 
@@ -849,19 +896,22 @@ void I_FinishUpdate(void)
                 first_frame = 0;
 
             } else if (pixeles_cambiados > 0) { 
-                
-                unsigned char delta_payload[24001]; 
+                // ... (EL BLOQUE DELTA SE QUEDA EXACTAMENTE COMO LO TENÍAIS) ...
+                unsigned char delta_payload[24002]; 
                 delta_payload[0] = 1; // DELTA FRAME
                 int d_ptr = 1;
-
                 for (int i = 0; i < 8000; i++) {
                     if (curr_frame[i] != prev_frame[i]) {
-                        delta_payload[d_ptr++] = (i >> 8) & 0xFF; 
+                        delta_payload[d_ptr++] = (i >> 8) & 0xFF;
                         delta_payload[d_ptr++] = i & 0xFF;        
                         delta_payload[d_ptr++] = curr_frame[i];   
                     }
                 }
-                
+
+                delta_payload[0] = encode_hamming(delta_payload[0]);
+                delta_payload[d_ptr] = calculate_checksum(delta_payload, d_ptr);
+                d_ptr++;
+
                 sendto(sock_fd, delta_payload, d_ptr, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
                 memcpy(prev_frame, curr_frame, 8000);
             }
