@@ -17,6 +17,7 @@
 //
 
 
+#include <cstdint>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -767,7 +768,7 @@ void I_FinishUpdate(void)
     // ==========================================
     static int sock_fd = -1;
     static struct sockaddr_in dest_addr;
-    static unsigned char prev_frame[16000];
+    static unsigned char prev_frame[8000];
     static int first_frame = 1;
     static int frame_skip = 0;
 
@@ -784,37 +785,45 @@ void I_FinishUpdate(void)
     if (I_VideoBuffer != NULL)
     {
         frame_skip++;
-        if(frame_skip%3==0){
-            unsigned char curr_frame[16000];
-            // static unsigned char to_send[(SCREENWIDTH / 2) * (SCREENHEIGHT / 2)];
-
+        if (frame_skip % 5 == 0) 
+        {
+            unsigned char curr_frame[8000];
             int ptr = 0;
 
-            for (unsigned int y = 0; y < SCREENHEIGHT; y += 2){
-                for (unsigned int x = 0; x < SCREENWIDTH; x += 2){
-                    curr_frame[ptr++] = I_VideoBuffer[y*SCREENWIDTH + x];
+            // --- 1. DOWNSAMPLING + 4-BIT PACKING (2 píxeles por cada byte) ---
+            for (unsigned int y = 0; y < SCREENHEIGHT; y += 2) {
+                // Saltamos de 4 en 4 en la X para coger los 2 píxeles correspondientes
+                for (unsigned int x = 0; x < SCREENWIDTH; x += 4) { 
+                    
+                    // Cogemos los 2 píxeles y los convertimos de 8 bits a 4 bits (>> 4)
+                    unsigned char p1 = I_VideoBuffer[y * SCREENWIDTH + x] >> 4;
+                    unsigned char p2 = I_VideoBuffer[y * SCREENWIDTH + x + 2] >> 4;
+                    
+                    // Fusionamos: p1 en la mitad alta, p2 en la mitad baja
+                    curr_frame[ptr++] = (p1 << 4) | (p2 & 0x0F);
                 }
-                
             }
 
-            int pix_changed = 0;
+            // --- 2. EL PRE-ESCÁNER (Ahora trabajamos sobre 8000 bytes empaquetados) ---
+            int pixeles_cambiados = 0;
             if (!first_frame) {
-                for (int i = 0; i < 16000; i++) {
-                    if(curr_frame [i]!=prev_frame[i])
-                        pix_changed++;
+                for (int i = 0; i < 8000; i++) {
+                    if (curr_frame[i] != prev_frame[i]) {
+                        pixeles_cambiados++;
+                    }
                 }
             }
-            
-            if (first_frame || pix_changed > 4000) {
+
+            // --- 3. LA GRAN DECISIÓN (Umbral del 25%: 2000 bytes) ---
+            if (first_frame || pixeles_cambiados > 2000) {
                 
-                // INTENTAMOS RLE (FRAME ENTERO COMPRIMIDO)
-                unsigned char rle_payload[32005]; 
-                rle_payload[0] = 2; // CABECERA 2 = RLE FRAME
+                unsigned char rle_payload[16005]; 
+                rle_payload[0] = 2; // RLE FRAME
                 int rle_ptr = 1;
                 unsigned char color_actual = curr_frame[0];
                 int contador = 1;
 
-                for (int i = 1; i < 16000; i++) {
+                for (int i = 1; i < 8000; i++) {
                     if (curr_frame[i] == color_actual && contador < 255) {
                          contador++;
                     } else {
@@ -827,29 +836,26 @@ void I_FinishUpdate(void)
                 rle_payload[rle_ptr++] = contador;
                 rle_payload[rle_ptr++] = color_actual;
 
-                // Válvula de seguridad del RLE
-                if (rle_ptr >= 16000) {
-                    // El RLE fracasó (ej: textura con mucho ruido). Enviamos RAW.
-                    unsigned char raw_payload[16001];
-                    raw_payload[0] = 0; // CABECERA 0 = RAW FRAME
-                    memcpy(&raw_payload[1], curr_frame, 16000);
-                    sendto(sock_fd, raw_payload, 16001, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+                if (rle_ptr >= 8000) {
+                    // RAW EMPAQUETADO (Máximo 8001 bytes)
+                    unsigned char raw_payload[8001];
+                    raw_payload[0] = 0; 
+                    memcpy(&raw_payload[1], curr_frame, 8000);
+                    sendto(sock_fd, raw_payload, 8001, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
                 } else {
-                    // El RLE triunfó
                     sendto(sock_fd, rle_payload, rle_ptr, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
                 }
                 
-                memcpy(prev_frame, curr_frame, 16000);
+                memcpy(prev_frame, curr_frame, 8000);
                 first_frame = 0;
 
-            } else if (pix_changed > 0) { 
+            } else if (pixeles_cambiados > 0) { 
                 
-                // --- APLICAMOS DELTA (Han cambiado pocos píxeles) ---
-                unsigned char delta_payload[48001]; 
-                delta_payload[0] = 1; // Cabecera 1 = DELTA FRAME
+                unsigned char delta_payload[24001]; 
+                delta_payload[0] = 1; // DELTA FRAME
                 int d_ptr = 1;
 
-                for (int i = 0; i < 16000; i++) {
+                for (int i = 0; i < 8000; i++) {
                     if (curr_frame[i] != prev_frame[i]) {
                         delta_payload[d_ptr++] = (i >> 8) & 0xFF; 
                         delta_payload[d_ptr++] = i & 0xFF;        
@@ -858,15 +864,9 @@ void I_FinishUpdate(void)
                 }
                 
                 sendto(sock_fd, delta_payload, d_ptr, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-                memcpy(prev_frame, curr_frame, 16000);
+                memcpy(prev_frame, curr_frame, 8000);
             }
-
-            
-
-
-
         }
-        
     }
     // ==========================================
     // FIN INYECCIÓN HACKUDC
