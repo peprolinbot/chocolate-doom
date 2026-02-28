@@ -17,7 +17,6 @@
 //
 
 
-#include <cstdint>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -748,6 +747,32 @@ static void CreateUpscaledTexture(boolean force)
     }
 }
 
+static uint8_t encode_hamming(uint8_t data) {
+    uint8_t d0 = (data >> 0) & 1;
+    uint8_t d1 = (data >> 1) & 1;
+    uint8_t d2 = (data >> 2) & 1;
+    uint8_t d3 = (data >> 3) & 1;
+
+    // Bits de paridad
+    uint8_t p1 = d0 ^ d1 ^ d3;
+    uint8_t p2 = d0 ^ d2 ^ d3;
+    uint8_t p3 = d1 ^ d2 ^ d3;
+
+    // Empaquetamos: p1(0), p2(1), d0(2), p3(3), d1(4), d2(5), d3(6)
+    return (p1 << 0) | (p2 << 1) | (d0 << 2) | (p3 << 3) |
+           (d1 << 4) | (d2 << 5) | (d3 << 6);
+}
+
+// Calcula un checksum XOR simple del payload
+static uint8_t calculate_checksum(unsigned char *data, int len) {
+    uint8_t chk = 0;
+    for (int i = 0; i < len; i++) {
+        chk ^= data[i];
+    }
+    return chk;
+}
+
+
 //
 // I_FinishUpdate
 //
@@ -778,54 +803,43 @@ void I_FinishUpdate(void)
         sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
         dest_addr.sin_family = AF_INET;
         dest_addr.sin_port = htons(6666); // Puerto de tu script Python
-        dest_addr.sin_addr.s_addr = inet_addr("192.168.185.53"); // IP destino
+        dest_addr.sin_addr.s_addr = inet_addr("192.168.6.159"); // IP destino
     }
 
     // 2. Enviar la matriz de píxeles al espacio
-    if (I_VideoBuffer != NULL)
-    {
+    if (I_VideoBuffer != NULL) {
         frame_skip++;
-        if (frame_skip % 5 == 0) 
-        {
+        if (frame_skip % 5 == 0) {
             unsigned char curr_frame[8000];
             int ptr = 0;
 
-            // --- 1. DOWNSAMPLING + 4-BIT PACKING (2 píxeles por cada byte) ---
+            // 1. DOWNSAMPLING + 4-BIT PACKING
             for (unsigned int y = 0; y < SCREENHEIGHT; y += 2) {
-                // Saltamos de 4 en 4 en la X para coger los 2 píxeles correspondientes
                 for (unsigned int x = 0; x < SCREENWIDTH; x += 4) { 
-                    
-                    // Cogemos los 2 píxeles y los convertimos de 8 bits a 4 bits (>> 4)
                     unsigned char p1 = I_VideoBuffer[y * SCREENWIDTH + x] >> 4;
                     unsigned char p2 = I_VideoBuffer[y * SCREENWIDTH + x + 2] >> 4;
-                    
-                    // Fusionamos: p1 en la mitad alta, p2 en la mitad baja
                     curr_frame[ptr++] = (p1 << 4) | (p2 & 0x0F);
                 }
             }
 
-            // --- 2. EL PRE-ESCÁNER (Ahora trabajamos sobre 8000 bytes empaquetados) ---
             int pixeles_cambiados = 0;
             if (!first_frame) {
                 for (int i = 0; i < 8000; i++) {
-                    if (curr_frame[i] != prev_frame[i]) {
-                        pixeles_cambiados++;
-                    }
+                    if (curr_frame[i] != prev_frame[i]) pixeles_cambiados++;
                 }
             }
 
-            // --- 3. LA GRAN DECISIÓN (Umbral del 25%: 2000 bytes) ---
+            // 2. DECISIÓN DE ENVÍO
             if (first_frame || pixeles_cambiados > 2000) {
-                
                 unsigned char rle_payload[16005]; 
-                rle_payload[0] = 2; // RLE FRAME
+                rle_payload[0] = 2; // Cabecera RLE Simple
                 int rle_ptr = 1;
                 unsigned char color_actual = curr_frame[0];
                 int contador = 1;
 
                 for (int i = 1; i < 8000; i++) {
                     if (curr_frame[i] == color_actual && contador < 255) {
-                         contador++;
+                        contador++;
                     } else {
                         rle_payload[rle_ptr++] = contador;
                         rle_payload[rle_ptr++] = color_actual;
@@ -837,37 +851,42 @@ void I_FinishUpdate(void)
                 rle_payload[rle_ptr++] = color_actual;
 
                 if (rle_ptr >= 8000) {
-                    // RAW EMPAQUETADO (Máximo 8001 bytes)
-                    unsigned char raw_payload[8001];
-                    raw_payload[0] = 0; 
+                    unsigned char raw_payload[8002];
+                    raw_payload[0] = 0; // Cabecera RAW Simple
                     memcpy(&raw_payload[1], curr_frame, 8000);
-                    sendto(sock_fd, raw_payload, 8001, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+                    // Checksum global: del byte 0 al 8000
+                    raw_payload[8001] = calculate_checksum(raw_payload, 8001);
+                    sendto(sock_fd, raw_payload, 8002, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
                 } else {
+                    // Checksum global: del byte 0 al rle_ptr-1
+                    rle_payload[rle_ptr] = calculate_checksum(rle_payload, rle_ptr);
+                    rle_ptr++;
                     sendto(sock_fd, rle_payload, rle_ptr, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
                 }
-                
                 memcpy(prev_frame, curr_frame, 8000);
                 first_frame = 0;
 
             } else if (pixeles_cambiados > 0) { 
-                
-                unsigned char delta_payload[24001]; 
-                delta_payload[0] = 1; // DELTA FRAME
+                unsigned char delta_payload[24002]; 
+                delta_payload[0] = 1; // Cabecera DELTA Simple
                 int d_ptr = 1;
-
                 for (int i = 0; i < 8000; i++) {
                     if (curr_frame[i] != prev_frame[i]) {
-                        delta_payload[d_ptr++] = (i >> 8) & 0xFF; 
+                        delta_payload[d_ptr++] = (i >> 8) & 0xFF;
                         delta_payload[d_ptr++] = i & 0xFF;        
                         delta_payload[d_ptr++] = curr_frame[i];   
                     }
                 }
-                
+                // Checksum global: del byte 0 al d_ptr-1
+                delta_payload[d_ptr] = calculate_checksum(delta_payload, d_ptr);
+                d_ptr++;
                 sendto(sock_fd, delta_payload, d_ptr, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
                 memcpy(prev_frame, curr_frame, 8000);
             }
         }
     }
+
+
     // ==========================================
     // FIN INYECCIÓN HACKUDC
     // ==========================================
