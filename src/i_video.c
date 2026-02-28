@@ -796,44 +796,69 @@ void I_FinishUpdate(void)
                 }
                 
             }
-            
-            if (first_frame){
-                unsigned char payload[16001];
-                payload[0] = 0;
 
-                memcpy(&payload[1],curr_frame,16000);
-
-                // SCREENWIDTH SCREENHEIGHT = 320 200 = 64000 bytes
-                sendto(sock_fd, payload,16001, 0,
-                (struct sockaddr *) &dest_addr, sizeof(dest_addr));
-
-                memcpy(prev_frame,curr_frame,16000);
-                first_frame = 0;
-
+            int pix_changed = 0;
+            if (!first_frame) {
+                for (int i = 0; i < 16000; i++) {
+                    if(curr_frame [i]!=prev_frame[i])
+                        pix_changed++;
+                }
             }
-            else {
-                unsigned char delta[48001];
-                delta[0] = 1;
-                int ptr2 = 1;
-                for(int i=0;i<16000;i++){
-                    if(curr_frame[i] != prev_frame[i]){ 
-                        delta[ptr2++] = (i >> 8) & 0xFF;
-                        delta[ptr2++] = i & 0xFF;
-                        delta[ptr2++] = curr_frame[i];
-                        prev_frame[i] = curr_frame[i];
+            
+            if (first_frame || pix_changed > 4000) {
+                
+                // INTENTAMOS RLE (FRAME ENTERO COMPRIMIDO)
+                unsigned char rle_payload[32005]; 
+                rle_payload[0] = 2; // CABECERA 2 = RLE FRAME
+                int rle_ptr = 1;
+                unsigned char color_actual = curr_frame[0];
+                int contador = 1;
+
+                for (int i = 1; i < 16000; i++) {
+                    if (curr_frame[i] == color_actual && contador < 255) {
+                         contador++;
+                    } else {
+                        rle_payload[rle_ptr++] = contador;
+                        rle_payload[rle_ptr++] = color_actual;
+                        color_actual = curr_frame[i];
+                        contador = 1;
                     }
                 }
+                rle_payload[rle_ptr++] = contador;
+                rle_payload[rle_ptr++] = color_actual;
 
-                if (ptr2 > 16001) {
-                    unsigned char payload[16001];
-                    payload[0] = 0;
-                    memcpy(&payload[1], curr_frame, 16000);
-                    sendto(sock_fd, payload, 16001, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-                } 
-                else if (ptr2 > 1) { 
-                    // Si hubo algún cambio, enviamos el parche Delta
-                    sendto(sock_fd, delta, ptr2, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+                // Válvula de seguridad del RLE
+                if (rle_ptr >= 16000) {
+                    // El RLE fracasó (ej: textura con mucho ruido). Enviamos RAW.
+                    unsigned char raw_payload[16001];
+                    raw_payload[0] = 0; // CABECERA 0 = RAW FRAME
+                    memcpy(&raw_payload[1], curr_frame, 16000);
+                    sendto(sock_fd, raw_payload, 16001, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+                } else {
+                    // El RLE triunfó
+                    sendto(sock_fd, rle_payload, rle_ptr, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
                 }
+                
+                memcpy(prev_frame, curr_frame, 16000);
+                first_frame = 0;
+
+            } else if (pix_changed > 0) { 
+                
+                // --- APLICAMOS DELTA (Han cambiado pocos píxeles) ---
+                unsigned char delta_payload[48001]; 
+                delta_payload[0] = 1; // Cabecera 1 = DELTA FRAME
+                int d_ptr = 1;
+
+                for (int i = 0; i < 16000; i++) {
+                    if (curr_frame[i] != prev_frame[i]) {
+                        delta_payload[d_ptr++] = (i >> 8) & 0xFF; 
+                        delta_payload[d_ptr++] = i & 0xFF;        
+                        delta_payload[d_ptr++] = curr_frame[i];   
+                    }
+                }
+                
+                sendto(sock_fd, delta_payload, d_ptr, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+                memcpy(prev_frame, curr_frame, 16000);
             }
 
             
