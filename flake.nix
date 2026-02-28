@@ -51,6 +51,9 @@
               SDL2
               SDL2_mixer
               SDL2_net
+
+              # For client
+              python3Packages.pygame
             ];
           };
         }
