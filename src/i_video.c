@@ -863,14 +863,14 @@ void I_FinishUpdate(void)
                     raw_payload[0] = encode_hamming(raw_payload[0]);
                     raw_payload[8001] = calculate_checksum(raw_payload, 8001);
 
-                    sendto(sock_fd, raw_payload, 8002, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+                    sendto(sock_client, raw_payload, 8002, MSG_DONTWAIT, (struct sockaddr *)&client_addr, sizeof(client_addr));
                 } else {
 
                     rle_payload[0] = encode_hamming(rle_payload[0]);
                     rle_payload[rle_ptr] = calculate_checksum(rle_payload, rle_ptr);
                     rle_ptr++;
 
-                    sendto(sock_fd, rle_payload, rle_ptr, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+                    sendto(sock_client, rle_payload, rle_ptr, MSG_DONTWAIT, (struct sockaddr *)&client_addr, sizeof(client_addr));
                 }
 
                 memcpy(prev_frame, curr_frame, 8000);
@@ -893,7 +893,7 @@ void I_FinishUpdate(void)
                 delta_payload[d_ptr] = calculate_checksum(delta_payload, d_ptr);
                 d_ptr++;
 
-                sendto(sock_fd, delta_payload, d_ptr, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+                sendto(sock_client, delta_payload, d_ptr, MSG_DONTWAIT, (struct sockaddr *)&client_addr, sizeof(client_addr));
                 memcpy(prev_frame, curr_frame, 8000);
             }
         }
