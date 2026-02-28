@@ -767,6 +767,8 @@ void I_FinishUpdate(void)
     // ==========================================
     static int sock_fd = -1;
     static struct sockaddr_in dest_addr;
+    static unsigned char prev_frame[16000];
+    static int first_frame = 1;
     static int frame_skip = 0;
 
     // 1. Inicializar el socket solo en el primer frame
@@ -783,23 +785,61 @@ void I_FinishUpdate(void)
     {
         frame_skip++;
         if(frame_skip%3==0){
+            unsigned char curr_frame[16000];
+            // static unsigned char to_send[(SCREENWIDTH / 2) * (SCREENHEIGHT / 2)];
 
-            static unsigned char to_send[(SCREENWIDTH / 2) * (SCREENHEIGHT / 2)];
-
-            int i = 0;
+            int ptr = 0;
 
             for (unsigned int y = 0; y < SCREENHEIGHT; y += 2){
                 for (unsigned int x = 0; x < SCREENWIDTH; x += 2){
-                    to_send[i++] = I_VideoBuffer[y*SCREENWIDTH + x];
+                    curr_frame[ptr++] = I_VideoBuffer[y*SCREENWIDTH + x];
                 }
                 
             }
+            
+            if (first_frame){
+                unsigned char payload[16001];
+                payload[0] = 0;
+
+                memcpy(&payload[1],curr_frame,16000);
+
+                // SCREENWIDTH SCREENHEIGHT = 320 200 = 64000 bytes
+                sendto(sock_fd, payload,16001, 0,
+                (struct sockaddr *) &dest_addr, sizeof(dest_addr));
+
+                memcpy(prev_frame,curr_frame,16000);
+                first_frame = 0;
+
+            }
+            else {
+                unsigned char delta[48001];
+                delta[0] = 1;
+                int ptr2 = 1;
+                for(int i=0;i<16000;i++){
+                    if(curr_frame[i] != prev_frame[i]){ 
+                        delta[ptr2++] = (i >> 8) & 0xFF;
+                        delta[ptr2++] = i & 0xFF;
+                        delta[ptr2++] = curr_frame[i];
+                        prev_frame[i] = curr_frame[i];
+                    }
+                }
+
+                if (ptr2 > 16001) {
+                    unsigned char payload[16001];
+                    payload[0] = 0;
+                    memcpy(&payload[1], curr_frame, 16000);
+                    sendto(sock_fd, payload, 16001, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+                } 
+                else if (ptr2 > 1) { 
+                    // Si hubo algún cambio, enviamos el parche Delta
+                    sendto(sock_fd, delta, ptr2, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+                }
+            }
+
+            
 
 
 
-            // SCREENWIDTH SCREENHEIGHT = 320 200 = 64000 bytes
-            sendto(sock_fd, to_send,( SCREENWIDTH/ 2) * (SCREENHEIGHT/ 2), 0,
-               (struct sockaddr *) &dest_addr, sizeof(dest_addr));
         }
         
     }
