@@ -6,5 +6,7 @@
 .envrc
 .cache
 build
+DOOM.WAD
+Doom1.WAD
 
 # End of https://www.toptal.com/developers/gitignore/api/direnv

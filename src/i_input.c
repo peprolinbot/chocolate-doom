@@ -247,6 +247,8 @@ void I_HandleKeyboardEvent(SDL_Event *sdlevent)
     // has terminated is undefined behaviour
     event_t event;
 
+    printf("keyboard_input!\n");
+
     switch (sdlevent->type)
     {
         case SDL_KEYDOWN:
