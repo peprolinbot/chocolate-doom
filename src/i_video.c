@@ -766,7 +766,7 @@ void I_FinishUpdate(void)
     // ==========================================
     // INICIO INYECCIÓN HACKUDC - DOWNLINK
     // ==========================================
-    static int sock_fd = -1;
+        static int sock_fd = -1;
     static struct sockaddr_in dest_addr;
     static unsigned char prev_frame[8000];
     static int first_frame = 1;
