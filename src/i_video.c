@@ -430,27 +430,6 @@ void I_GetEvent(void)
     {
         switch (sdlevent.type)
         {
-            case SDL_KEYDOWN:
-                if (ToggleFullScreenKeyShortcut(&sdlevent.key.keysym))
-                {
-                    I_ToggleFullScreen();
-                    break;
-                }
-                // deliberate fall-though
-
-            case SDL_KEYUP:
-		I_HandleKeyboardEvent(&sdlevent);
-                break;
-
-            case SDL_MOUSEBUTTONDOWN:
-            case SDL_MOUSEBUTTONUP:
-            case SDL_MOUSEWHEEL:
-                if (usemouse && !nomouse && window_focused)
-                {
-                    I_HandleMouseEvent(&sdlevent);
-                }
-                break;
-
             case SDL_QUIT:
                 if (screensaver_mode)
                 {
@@ -461,13 +440,6 @@ void I_GetEvent(void)
                     event_t event;
                     event.type = ev_quit;
                     D_PostEvent(&event);
-                }
-                break;
-
-            case SDL_WINDOWEVENT:
-                if (sdlevent.window.windowID == SDL_GetWindowID(screen))
-                {
-                    HandleWindowEvent(&sdlevent.window);
                 }
                 break;
 
