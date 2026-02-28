@@ -1,102 +1,63 @@
-# Chocolate Doom
+# Slay-sat 🛰️ 
 
-Chocolate Doom aims to accurately reproduce the original DOS version of
-Doom and other games based on the Doom engine in a form that can be
-run on modern computers.
+![Slay-sat banner](banner.jpg)
 
-Originally, Chocolate Doom was only a Doom source port. The project
-now includes ports of Heretic and Hexen, and Strife.
+_Créditos imagen: [wallpapers.com](https://wallpapers.com)_
 
-Chocolate Doom’s aims are:
+_README original de _Chocolate Doom_ [aquí](README.chocolate-doom.md)_
 
- * To always be 100% Free and Open Source software.
- * Portability to as many different operating systems as possible.
- * Accurate reproduction of the original DOS versions of the games,
-   including bugs.
- * Compatibility with the DOS demo, configuration and savegame files.
- * To provide an accurate retro “feel” (display and input should
-   behave the same).
+Este es un proyecto para el [HackUDC 2026](https://hackudc.gpul.org), que
+consiste en ejecutar Doom en un satélite (hipotéticamente).
 
-More information about the philosophy and design behind Chocolate Doom
-can be found in the PHILOSOPHY file distributed with the source code.
+## 📐 Arquitectura
 
-## Setting up gameplay
+La idea es emplear un protocolo de transmisión a prueba de entornos de red
+hostiles (alta latencia, pérdida de paquetes, ancho de banda limitado...)
+manteniendo la jugabilidad.
 
-For instructions on how to set up Chocolate Doom for play, see the
-INSTALL file.
+De esta manera se intenta simular la comunicación de un satélite (_servidor_),
+donde se ejecuta el motor del juego, y una estación en tierra (_cliente_) donde
+se visualiza el juego y se toman acciones.
 
-## Configuration File
+### 📡 Entorno de transmisión
 
-Chocolate Doom is compatible with the DOS Doom configuration file
-(normally named `default.cfg`). Existing configuration files for DOS
-Doom should therefore simply work out of the box. However, Chocolate
-Doom also provides some extra settings. These are stored in a
-separate file named `chocolate-doom.cfg`.
+Dado que el objetivo es simular la comunicación con un satélite, se han asumido
+ciertas características de su entorno para aproximar las pruebas realizadas
+durante el desarrollo a una situación real:
 
-The configuration can be edited using the chocolate-setup tool.
+- El servidor se considera un satélite geoestacionario, por lo que la conexión
+  puede establecerse de forma continuada y sin interrupciones causadas por su
+  trayectoria.
+- Dada la distancia entre la superficie terrestre y el satélite, se asume un RTT
+  de entre 500 y 600 ms, debido a que el tiempo medio de transmisión entre ambos
+  es de 250-300ms en casos reales.
+- Debido a la falta de protección ante ondas electromagnéticas en el espacio, la
+  posibilidad de que un paquete se pierda o sea modificado durante su
+  transmisión es muy alta.
 
-## Command line options
+Teniendo esto en cuenta, esta versión modificada de Chocolate DOOM prioriza
+adaptarse a estas situaciones frente a proporcionar una experiencia de juego
+idéntica al juego en local.
 
-Chocolate Doom supports a number of command line parameters, including
-some extras that were not originally suported by the DOS versions. For
-binary distributions, see the CMDLINE file included with your
-download; more information is also available on the Chocolate Doom
-website.
+## 💡 Probar el proyecto
 
-## Playing TCs
+Todo funciona con ✨[Nix & NixOS](https://nixos.org)✨ así que es tan sencillo
+como:
 
-With Vanilla Doom there is no way to include sprites in PWAD files.
-Chocolate Doom’s ‘-file’ command line option behaves exactly the same
-as Vanilla Doom, and trying to play TCs by adding the WAD files using
-‘-file’ will not work.
-
-Many Total Conversions (TCs) are distributed as a PWAD file which must
-be merged into the main IWAD. Typically a copy of DEUSF.EXE is
-included which performs this merge. Chocolate Doom includes a new
-option, ‘-merge’, which will simulate this merge. Essentially, the
-WAD directory is merged in memory, removing the need to modify the
-IWAD on disk.
-
-To play TCs using Chocolate Doom, run like this:
-
-```
-chocolate-doom -merge thetc.wad
-```
-
-Here are some examples:
-
-```
-chocolate-doom -merge batman.wad -deh batman.deh vbatman.deh  (Batman Doom)
-chocolate-doom -merge aoddoom1.wad -deh aoddoom1.deh  (Army of Darkness Doom)
-```
-
-## Other information
-
- * Chocolate Doom includes a number of different options for music
-   playback. See the README.Music file for more details.
-
- * More information, including information about how to play various
-   classic TCs, is available on the Chocolate Doom website:
-
-     https://www.chocolate-doom.org/
-
-   You are encouraged to sign up and contribute any useful information
-   you may have regarding the port!
-
- * Chocolate Doom is not perfect. Although it aims to accurately
-   emulate and reproduce the DOS executables, some behavior can be very
-   difficult to reproduce. Because of the nature of the project, you
-   may also encounter Vanilla Doom bugs; these are intentionally
-   present; see the NOT-BUGS file for more information.
-
-   New bug reports, feedback, questions or suggestions can be submitted
-   to the issue tracker on Github:
-
-     https://github.com/chocolate-doom/chocolate-doom/issues
-
- * Source code patches are welcome, but please follow the style
-   guidelines - see the file named HACKING included with the source
-   distribution.
-
- * Chocolate Doom is distributed under the GNU GPL. See the COPYING
-   file for more information.
+- Compilar: `nix build`
+- Entorno desarrollo: `nix develop` Ejecutar el programa:
+- Servidor (Chocolate Doom):
+  ```
+  DOOM_CLIENT_ADDR=127.0.0.1 \
+  DOOM_CLIENT_PORT=6666 \
+  SDL_VIDEODRIVER=dummy \
+  DOOM_SERVER_PORT=7777 \
+  ./result/bin/chocolate-doom -iwad DOOM.wad
+  ```
+- Cliente:
+  ```
+  DOOM_SAT_ADDR=127.0.0.1 \
+  DOOM_LISTEN_PORT=6666 \
+  python3 cliente.py
+  ```
+**Nota importante**: Es necesario el archivo `DOOM.wad` (u otro archivo iwad) para utilizar Chocolate Doom ([más info.](https://doomwiki.org/wiki/IWAD))
