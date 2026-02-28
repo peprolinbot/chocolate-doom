@@ -56,6 +56,7 @@ s_u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 print("Esperando señal de video")
 
 ejecutando = True
+frame_buffer = bytearray (ancho*alto)
 while ejecutando:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -87,8 +88,23 @@ while ejecutando:
             
             bytes_acumulados+=len(datos)
 
-            if len(datos) == (ancho * alto):
-                imagen = pygame.image.frombuffer(datos, (ancho,alto), "P")
+            if len(datos) > 0:
+                cabecera = datos[0]
+                if cabecera == 0 and len(datos) == 16001:
+                    frame_buffer[:] = datos[1:]
+                elif cabecera == 1:
+                    cambios = datos[1:]
+                    for i in range (0, len(cambios), 3):
+                        if i + 2 < len(cambios):
+                            idx = (cambios[i]<<8) | cambios[i+1]
+                            color = cambios[i+2]
+
+                            if idx < len(frame_buffer):
+                                frame_buffer[idx] = color
+
+
+
+                imagen = pygame.image.frombuffer(bytes(frame_buffer), (ancho,alto), "P")
                 imagen.set_palette(paleta_gris)
                 imagen_escalada = pygame.transform.scale(imagen, (ancho*escala, alto * escala))
 
