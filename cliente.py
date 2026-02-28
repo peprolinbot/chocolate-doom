@@ -90,8 +90,10 @@ while ejecutando:
 
             if len(datos) > 0:
                 cabecera = datos[0]
+                
                 if cabecera == 0 and len(datos) == 16001:
                     frame_buffer[:] = datos[1:]
+
                 elif cabecera == 1:
                     cambios = datos[1:]
                     for i in range (0, len(cambios), 3):
@@ -101,7 +103,19 @@ while ejecutando:
 
                             if idx < len(frame_buffer):
                                 frame_buffer[idx] = color
+                elif cabecera==2:
+                    datos_rle = datos[1:]
+                    idx_mem = 0
 
+                    for i in range (0, len(datos_rle), 2):
+                        if i+1 < len(datos_rle):
+                            cont = datos_rle[i]
+                            color = datos_rle[i+1]
+
+                            for _ in range(cont):
+                                if idx_mem < 16000:
+                                    frame_buffer[idx_mem] = color
+                                    idx_mem += 1
 
 
                 imagen = pygame.image.frombuffer(bytes(frame_buffer), (ancho,alto), "P")
