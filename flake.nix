@@ -54,6 +54,8 @@
 
               # For client
               python3Packages.pygame
+              python3Packages.prometheus-client
+              python3Packages.requests
             ];
           };
         }
