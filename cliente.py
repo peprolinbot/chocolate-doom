@@ -53,7 +53,6 @@ def reparar_cabecera_hamming(byte_corrupto):
     sindrome = (s3 << 2) | (s2 << 1) | s1
 
     if sindrome != 0:
-        print(f"Bit flipped, reparado.")
         #Volteamos el bit de datos correspondiente si roto
         if sindrome == 3: d1 ^= 1
         elif sindrome == 5: d2 ^= 1
@@ -226,8 +225,8 @@ while ejecutando:
         app_metrics.update(fps_actuales, kbps, 0)
 
         #Cambio de color de ping
-        color_p = (0, 255, 0) if ping_ms < 100 else (255, 0, 0)
-        texto_ping = FUENTE.render(f"PING: {ping_ms:.0f} ms", True, color_p, (0, 0, 0))
+        color_p = (0, 255, 0) if ping_ms < 700 else (255, 0, 0)
+        texto_ping = FUENTE.render(f"PING: {ping_ms:04.0f} ms", True, color_p, (0, 0, 0))
 
 
         bytes_acumulados = 0
