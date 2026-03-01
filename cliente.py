@@ -193,7 +193,6 @@ while ejecutando:
                     check_calculado ^= b
 
                 if check_calculado != checksum_recibido:
-                    print(" ¡BIT FLIP EN VÍDEO! Frame descartado")
                     paquetes_corruptos += 1
                     continue
 
