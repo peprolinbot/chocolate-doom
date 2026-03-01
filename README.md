@@ -76,6 +76,16 @@ como:
 - Compilar: `nix build`
 - Entorno desarrollo: `nix develop` 
 
+Simular el entorno espacial (Latencia GEO)
+- Añadir latencia:
+  ```
+  sudo tc qdisc add dev wlp4s0 root netem delay 500ms
+  ```
+- Limpiar la red:
+  ```
+  sudo tc qdisc del dev wlp4s0 root netem 
+  ```
+
 Ejecutar el programa:
 - Servidor (Chocolate Doom):
   ```
@@ -91,4 +101,5 @@ Ejecutar el programa:
   DOOM_LISTEN_PORT=6666 \
   python3 cliente.py
   ```
+
 **Nota importante**: Es necesario el archivo `DOOM.wad` (u otro archivo iwad) para utilizar Chocolate Doom ([más info.](https://doomwiki.org/wiki/IWAD))
