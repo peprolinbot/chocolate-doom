@@ -40,8 +40,8 @@ idéntica al juego en local.
 ## Eficiencia de enlace
 
 Transmitir video crudo saturaría el enlace satelital al instante. Por ello, 
-hemos diseñado un _protocolo binario custom_ que logra mantener el consumo 
-por debajo de 500Kbps mediante un pipeline de compresión dinámico:
+hemos diseñado un _protocolo binario custom_ que logra mantener el consumo de
+ancho de banda por debajo de 500Kbps mediante un pipeline de compresión dinámico:
 
 1. **Byte-Packaging**
    Renderizamos el juego internamente a 160x100 y a un framerate reducida en 
@@ -51,7 +51,7 @@ por debajo de 500Kbps mediante un pipeline de compresión dinámico:
    Según el ruido visual de cada frame se pueden emplear:
    - **Algoritmo Delta**: para movimientos en los que apenas hay ruido, 
    únicamente se mandan los píxeles modificados [Y, X, Color].
-   - **Compresión RLE (Run Lenght Encoding) / RAW:** en el caso contrario 
+   - **Compresión RLE (Run Length Encoding) / RAW:** en el caso contrario 
    donde el ruido es considerable, los píxeles adyacentes de un mismo color se 
    agrupan [Cantidad, Color]. 
    
@@ -62,7 +62,7 @@ Para evitarlo, hemos planteado un _Forward Error Correction (FEC)_ por sofware:
    descompresión al cliente (0=RAW, 1=DELTA, 2=RLE). Este header se transmite
    entrelazado con 3 bits de paridad. De esta forma, si 1 bit es alterado, se 
    calcula el Síndrome detectando el error y reparándolo al momento.
-   - **Checksum (XOR):** Los datos visuales llevan un último bit a forma de 
+   - **Checksum (XOR):** Los datos visuales llevan un último byte a forma de 
    "firma". Si el frame llega corrupto, se descarta sin congelar el juego.
    - **Comandos asíncronos (uplink):** Las pulsaciones del teclado se transmiten 
    de Tierra al Satélite en paquetes diminutos(D:Tecla, U:Tecla) a través del 
@@ -73,9 +73,10 @@ Para evitarlo, hemos planteado un _Forward Error Correction (FEC)_ por sofware:
 
 Todo funciona con ✨[Nix & NixOS](https://nixos.org)✨ así que es tan sencillo
 como:
-
 - Compilar: `nix build`
-- Entorno desarrollo: `nix develop` Ejecutar el programa:
+- Entorno desarrollo: `nix develop` 
+
+Ejecutar el programa:
 - Servidor (Chocolate Doom):
   ```
   DOOM_CLIENT_ADDR=127.0.0.1 \
