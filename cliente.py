@@ -278,8 +278,6 @@ while ejecutando:
     screen.blit(texto_kbps, (10, 10))
     screen.blit(texto_fps, (10, 40))
     screen.blit(texto_ping, (10, 70))
-    screen.blit(texto_loss, (10, 100))
-
     pygame.display.flip()
 
 pygame.quit()
