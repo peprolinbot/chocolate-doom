@@ -500,8 +500,8 @@ void I_StartTic(void)
 
     /////// UPLINK /////////
 
-    char buffer[32];
-    socklen_t len = sizeof(int);
+    char buffer[1024];
+    socklen_t len = sizeof(server_addr);
 
     // Intentar leer un comando (ej: "D:119" o "U:119")
     int n;
@@ -853,13 +853,13 @@ void I_FinishUpdate(void)
                     memcpy(&raw_payload[1], curr_frame, 8000);
 
                     raw_payload[0] = encode_hamming(raw_payload[0]);
-                    raw_payload[8001] = calculate_checksum(raw_payload, 8001);
+                    raw_payload[8001] = calculate_checksum(&raw_payload[1], 8000);
 
                     sendto(sock_client, raw_payload, 8002, MSG_DONTWAIT, (struct sockaddr *)&client_addr, sizeof(client_addr));
                 } else {
 
                     rle_payload[0] = encode_hamming(rle_payload[0]);
-                    rle_payload[rle_ptr] = calculate_checksum(rle_payload, rle_ptr);
+                    rle_payload[rle_ptr] = calculate_checksum(&rle_payload[1], rle_ptr-1);
                     rle_ptr++;
 
                     sendto(sock_client, rle_payload, rle_ptr, MSG_DONTWAIT, (struct sockaddr *)&client_addr, sizeof(client_addr));
@@ -882,7 +882,7 @@ void I_FinishUpdate(void)
                 }
 
                 delta_payload[0] = encode_hamming(delta_payload[0]);
-                delta_payload[d_ptr] = calculate_checksum(delta_payload, d_ptr);
+                delta_payload[d_ptr] = calculate_checksum(&delta_payload[1], d_ptr-1);
                 d_ptr++;
 
                 sendto(sock_client, delta_payload, d_ptr, MSG_DONTWAIT, (struct sockaddr *)&client_addr, sizeof(client_addr));
