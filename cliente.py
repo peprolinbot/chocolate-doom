@@ -226,7 +226,7 @@ while ejecutando:
 
         #Cambio de color de ping
         color_p = (0, 255, 0) if ping_ms < 700 else (255, 0, 0)
-        texto_ping = FUENTE.render(f"PING: {ping_ms:04.0f} ms", True, color_p, (0, 0, 0))
+        texto_ping = FUENTE.render(f"PING: {ping_ms:03.0f} ms", True, color_p, (0, 0, 0))
 
 
         bytes_acumulados = 0
