@@ -206,13 +206,16 @@ static const unsigned int *icon_data;
 static int icon_w;
 static int icon_h;
 
-// Satellite client
+
+
+
+// Sockets y direcciones (Cliente y servidor)
 int sock_client = -1;
 struct sockaddr_in client_addr;
 
-// Satellite server
 int sock_server = -1;
 struct sockaddr_in server_addr;
+
 
 
 static boolean MouseShouldBeGrabbed()
@@ -498,17 +501,17 @@ void I_StartTic(void)
         return;
     }
 
-    /////// UPLINK /////////
-
+    // =====================================================================
+    /**
+     * Uplink: recepción de controles con UDP no bloqueante
+     */
     char buffer[1024];
     socklen_t len = sizeof(server_addr);
-
-    // Intentar leer un comando (ej: "D:119" o "U:119")
     int n;
 
-    // Cambiado if por while para procesar todas las teclas acumuladas
+    //Leemos todos los comandos acumulados en el buffer sin congelar el juego
     while ((n = recvfrom(sock_server, buffer, sizeof(buffer) - 1, MSG_DONTWAIT, (struct sockaddr *)&server_addr, &len)) > 0) {
-        buffer[n] = '\0'; // Ahora es seguro por el 'sizeof(buffer) - 1'
+        buffer[n] = '\0'; // Seguridad
         int doom_key;
         char type;
 
@@ -517,11 +520,10 @@ void I_StartTic(void)
             memset(&event,0, sizeof(event));
             event.type = (type == 'D') ? ev_keydown : ev_keyup;
             event.data1 = doom_key;
-            D_PostEvent(&event); 
+            D_PostEvent(&event); //Función propia del motor de juego
         }
     }
-
-    /////// UPLINK /////////
+    // =====================================================================
 
 
     I_GetEvent();
@@ -733,23 +735,31 @@ static void CreateUpscaledTexture(boolean force)
     }
 }
 
+
+/**
+ * Codifica un byte de control implementando Hamming(7,4)
+ * Inyecta 3 bits de paridad para permitir autoreparación en el cliente en caso de radiación
+ */
 static uint8_t encode_hamming(uint8_t data) {
     uint8_t d0 = (data >> 0) & 1;
     uint8_t d1 = (data >> 1) & 1;
     uint8_t d2 = (data >> 2) & 1;
     uint8_t d3 = (data >> 3) & 1;
 
-    // Bits de paridad
+    // Paridad
     uint8_t p1 = d0 ^ d1 ^ d3;
     uint8_t p2 = d0 ^ d2 ^ d3;
     uint8_t p3 = d1 ^ d2 ^ d3;
 
-    // Empaquetamos: p1(0), p2(1), d0(2), p3(3), d1(4), d2(5), d3(6)
+    // Empaquetado final
     return (p1 << 0) | (p2 << 1) | (d0 << 2) | (p3 << 3) |
            (d1 << 4) | (d2 << 5) | (d3 << 6);
 }
 
-// Calcula un checksum XOR simple del payload
+/**
+ * Calcula checksum XOR del payload del video
+ * Lo usamos para descartar posibles frames corruptos
+ */
 static uint8_t calculate_checksum(unsigned char *data, int len) {
     uint8_t chk = 0;
     for (int i = 0; i < len; i++) {
@@ -773,24 +783,28 @@ void I_FinishUpdate(void)
     if (noblit)
         return;
 
+
+    // =====================================================================
+    /**
+     * Downlink: compresión y envío del framebuffer
+     */
     static unsigned char prev_frame[8000];
     static int first_frame = 1;
     static int frame_skip = 0;
     
-
-    // Enviar la matriz de píxeles al espacio
-    if (I_VideoBuffer != NULL)
-    {
+    if (I_VideoBuffer != NULL){
         frame_skip++;
-        if (frame_skip % 5 == 0) 
-        {
-            // --- NOVEDAD 1: TABLA DE GRISES REALES ---
-            // Convierte el índice de color raro de DOOM en un gris perfecto de 0 a 15
+
+        //Limitador de framerate
+        if (frame_skip % 5 == 0){
+            
+            //Reducción de paleta de grises 
             static unsigned char gray_lut[256];
             static int lut_init = 0;
+
+            //Aplicamos fórmula de luminancia -> 16 tonos de gris (4bits)
             if (!lut_init) {
                 for (int i=0; i<256; i++) {
-                    // Fórmula estándar de luminancia de TV: L = R*0.3 + G*0.59 + B*0.11
                     int lum = (palette[i].r * 77 + palette[i].g * 150 + palette[i].b * 29) >> 8;
                     gray_lut[i] = lum >> 4; // Lo escalamos a 4-bits
                 }
@@ -800,13 +814,12 @@ void I_FinishUpdate(void)
             unsigned char curr_frame[8000];
             int ptr = 0;
 
-            // --- 1. DOWNSAMPLING CON COLOR REAL ---
+            // Downsampling empaquetando 2 píxeles 
             for (unsigned int y = 0; y < SCREENHEIGHT; y += 2) {
                 for (unsigned int x = 0; x < SCREENWIDTH; x += 4) { 
                     unsigned char idx1 = I_VideoBuffer[y * SCREENWIDTH + x];
                     unsigned char idx2 = I_VideoBuffer[y * SCREENWIDTH + x + 2];
-                    
-                    // Pasamos el índice por nuestra tabla mágica
+    
                     unsigned char p1 = gray_lut[idx1];
                     unsigned char p2 = gray_lut[idx2];
                     
@@ -814,30 +827,31 @@ void I_FinishUpdate(void)
                 }
             }
 
-            // --- 2. EL PRE-ESCÁNER ---
+            //Comprobación de que tanto cambio hay en el frame
             int pixeles_cambiados = 0;
             if (!first_frame) {
                 for (int i = 0; i < 8000; i++) {
-                    if (curr_frame[i] != prev_frame[i]) {
+                    if (curr_frame[i] != prev_frame[i])
                         pixeles_cambiados++;
-                    }
                 }
             }
 
-            // --- 3. LA GRAN DECISIÓN (Con Keyframes de limpieza) ---
-            // NOVEDAD 2: Forzamos RLE/RAW cada 30 frames para limpiar basura de red
+            // Decisión de forma de "compresión"
+
+            //Opción 1: Muchos cambios -> RLE o RAW
             if (first_frame || pixeles_cambiados > 2000 || (frame_skip % 30 == 0)) {
                 
                 unsigned char rle_payload[16002]; 
-                rle_payload[0] = 2; // RLE FRAME
+                rle_payload[0] = 2; //Header RLE
                 int rle_ptr = 1;
                 unsigned char color_actual = curr_frame[0];
                 int contador = 1;
 
+                //Run Length Encoding (RLE)
                 for (int i = 1; i < 8000; i++) {
-                    if (curr_frame[i] == color_actual && contador < 255) {
-                         contador++;
-                    } else {
+                    if (curr_frame[i] == color_actual && contador < 255) 
+                        contador++;
+                    else {
                         rle_payload[rle_ptr++] = contador;
                         rle_payload[rle_ptr++] = color_actual;
                         color_actual = curr_frame[i];
@@ -847,18 +861,19 @@ void I_FinishUpdate(void)
                 rle_payload[rle_ptr++] = contador;
                 rle_payload[rle_ptr++] = color_actual;
 
-                if (rle_ptr >= 8000) {
+                //Pesa más el RLE o el RAW?
+                if (rle_ptr >= 8000) { //RAW
                     unsigned char raw_payload[8002];
-                    raw_payload[0] = 0; // RAW FRAME
+                    raw_payload[0] = 0; //Header de RAW
                     memcpy(&raw_payload[1], curr_frame, 8000);
 
                     raw_payload[0] = encode_hamming(raw_payload[0]);
                     raw_payload[8001] = calculate_checksum(&raw_payload[1], 8000);
 
                     sendto(sock_client, raw_payload, 8002, MSG_DONTWAIT, (struct sockaddr *)&client_addr, sizeof(client_addr));
-                } else {
-
-                    rle_payload[0] = encode_hamming(rle_payload[0]);
+                } 
+                else { //RLE
+                    rle_payload[0] = encode_hamming(rle_payload[0]); 
                     rle_payload[rle_ptr] = calculate_checksum(&rle_payload[1], rle_ptr-1);
                     rle_ptr++;
 
@@ -868,11 +883,13 @@ void I_FinishUpdate(void)
                 memcpy(prev_frame, curr_frame, 8000);
                 first_frame = 0;
 
+            //Opción 2: Delta
             } else if (pixeles_cambiados > 0) { 
-                // ... (EL BLOQUE DELTA SE QUEDA EXACTAMENTE COMO LO TENÍAIS) ...
                 unsigned char delta_payload[24002]; 
-                delta_payload[0] = 1; // DELTA FRAME
+                delta_payload[0] = 1; //Header delta
                 int d_ptr = 1;
+
+                //Y(pos alta), X(pos baja), color
                 for (int i = 0; i < 8000; i++) {
                     if (curr_frame[i] != prev_frame[i]) {
                         delta_payload[d_ptr++] = (i >> 8) & 0xFF;
@@ -890,6 +907,8 @@ void I_FinishUpdate(void)
             }
         }
     }
+
+    // =====================================================================
     
 
     if (need_resize)
