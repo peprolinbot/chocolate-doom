@@ -1,6 +1,6 @@
-# Slay-sat 🛰️ 
+# SlaySat 🛰️ 
 
-![Slay-sat banner](banner.jpg)
+![SlaySat banner](banner.jpg)
 
 _Créditos imagen: [wallpapers.com](https://wallpapers.com)_
 
@@ -28,7 +28,7 @@ durante el desarrollo a una situación real:
 - **Orbita Geoestacionaria (GEO):** La conexión puede establecerse de forma 
   continuada y sin interrupciones causadas por su trayectoria.
 - **Alta latencia espacial:** Dada la distancia entre la superficie terrestre
-  y el satélite, se asume un RTT (Round Trip Time) de entre 500-600 ms.
+  y el satélite (~36.000km), se asume un RTT (Round Trip Time) de entre 500-600 ms.
 - **Radiación y packet loss:** Debido a la falta de protección ante ondas
   electromagnéticas en el espacio, la posibilidad de que un paquete se pierda 
   o de "Bit flips" durante su transmisión es crítica.
